@@ -131,6 +131,87 @@ def main():
             #faiss_index = get_vector_store(docs)
             st.write(get_response_llm(llm,faiss_index,user_question))
             st.success("Done")
+import requests
+import json
+
+# --- CONFIGURATION ---
+SOURCEGRAPH_URL = "https://<your-sourcegraph-instance>"  # e.g., https://sourcegraph.example.com
+ACCESS_TOKEN = "your_token_here"
+
+# --- HEADERS ---
+HEADERS = {
+    "Authorization": f"token {ACCESS_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+def build_binary_file_query(file_extensions):
+    """
+    Constructs a Sourcegraph search query to find binary files based on extensions.
+
+    Args:
+        file_extensions (list of str): List of extensions (e.g., ['exe', 'bin'])
+
+    Returns:
+        str: Search query string
+    """
+    pattern = '|'.join(file_extensions)
+    return f'count:1000 type:file file:\\.({pattern})$'
+
+def fetch_repos_with_binary_files(search_query):
+    """
+    Fetch repositories containing binary files using Sourcegraph's GraphQL API.
+
+    Args:
+        search_query (str): Sourcegraph search query string
+
+    Returns:
+        list of tuples: List of (repository_name, file_path) containing binary files
+    """
+    graphql_payload = {
+        "query": """
+        query($searchQuery: String!) {
+          search(query: $searchQuery) {
+            results {
+              results {
+                ... on FileMatch {
+                  repository {
+                    name
+                  }
+                  file {
+                    path
+                  }
+                }
+              }
+            }
+          }
+        }
+        """,
+        "variables": {
+            "searchQuery": search_query
+        }
+    }
+
+    response = requests.post(
+        f"{SOURCEGRAPH_URL}/.api/graphql",
+        headers=HEADERS,
+        data=json.dumps(graphql_payload)
+    )
+
+    if response.status_code != 200:
+        raise Exception(f"API Error {response.status_code}: {response.text}")
+
+    results = response.json().get("data", {}).get("search", {}).get("results", {}).get("results", [])
+    return [(res["repository"]["name"], res["file"]["path"]) for res in results]
+
+# --- USAGE EXAMPLE ---
+if __name__ == "__main__":
+    binary_extensions = ['exe', 'dll', 'bin', 'so', 'zip', 'jpg', 'png']  # customize
+    query = build_binary_file_query(binary_extensions)
+    matches = fetch_repos_with_binary_files(query)
+
+    print("Repositories with binary-like files:")
+    for repo, path in matches:
+        print(f"- {repo} :: {path}")
 
 if __name__ == "__main__":
     main()
